@@ -1,0 +1,13 @@
+SolverCode - 0 - NS with Energy 1 - NS 2- Scalar
+0
+Parameters - rho, mu, Cp, gx, gy, Beta, Pr, buoyancyflag
+1.0 0.01 1.0 0.0 1.0 100 0.1 1
+Time Scheme, Restart Flag, ntime, datainter, dt
+2 0 1 1 1E20
+Max Outer Iterations, Store Residuals, maxOverallRes
+10000	1 1e-5
+Equation parameters - Inner Iterations, Tolerance, Blending Factor, Under Relaxation Factor
+40 1e-2 1.0 0.8
+400 1e-2 1.0 0.3
+40 1e-2 1.0 0.9
+
