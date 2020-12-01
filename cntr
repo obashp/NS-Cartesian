@@ -1,0 +1,32 @@
+set loadpath '/usr/share/gnuplot/5.4/PostScript'
+set view map
+set contour
+unset surface
+
+set terminal postscript eps size 3.0,3.0 enhanced color font 'Helvetica,12' linewidth 1.2
+set output 'Streamfunction.eps'
+set title "Streamlines - Re 1000, 256x256" font "Helvetica,14"
+set multiplot
+set cntrparam levels disc -0.1175,-0.1150,-0.1100,-0.1000,-0.0900,-0.0700,-0.0500,-0.0300,-0.0100,-1e-4,-1e-5,-1e-7
+set cntrlabel font ",5" onecolor
+set style textbox opaque margins  0.5,  0.5 noborder
+splot 'Streamfunction_0' u 1:2:3 title "" with lines lc rgb "#000000",\
+	'Streamfunction_0' u 1:2:3 title "" with labels boxed pointinterval -1
+
+set cntrparam levels disc 1e-8,1e-7,1e-6,1e-5,5e-5,1e-4,2.5e-4,5e-4,1e-3,1.5e-3,3e-3
+splot 'Streamfunction_0' u 1:2:3 title "" with lines lc rgb "#000000"
+unset multiplot
+
+set size ratio 0.4
+set tics scale 0.25
+set ytics 0,0.1,0.4
+set cntrparam levels disc -0.0100,-1e-4,1e-5,1e-4,5e-4,1e-3,1.5e-3,3e-3
+set title "Corner Eddies" font "Helvetica,10"
+unset key
+set xrange [0.0:1.0]
+set yrange [0.0:0.4]
+set style textbox opaque margins  0.5,  0.5 noborder
+splot 'Streamfunction_0' u 1:2:3 title "" with lines lc rgb "#000000",\
+	'Streamfunction_0' u 1:2:3 title "" with labels boxed pointinterval -1
+
+
