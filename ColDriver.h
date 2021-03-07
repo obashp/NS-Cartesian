@@ -1,5 +1,6 @@
 #include "Grid.h"
 #include "Solver.h"
+// #include "Boundary.h"
 #pragma once
 using namespace std;
 
@@ -30,13 +31,12 @@ protected:
 	int *NbrIdx;	//Neighbour indices of P- can be a 1D array for Structured Grid
 	double Cn, Ce, Cp, D;	//Convective and Diffusive Flux Coefficients
 	double *Lambda, *Urf;	//Blending factor for Deferred Correction, Underrelaxation factor for diagonal dominance
-	double Tol;
-	long int inners;
 	//timestep, physical time, time instant  
 	static unsigned short restart;
 	static double dt, time;
 	static unsigned long int ntime, itime;
-	static unsigned short Time_Scheme;	// 0 - Euler Implicit, 1- BDF2, 2- Steady
+	unsigned short Time_Scheme;	// 0 - Euler Implicit, 1- BDF2, 2- Steady
+	double Tbf;	//Time Blending through deferred correction
 
 	Solver *Sol;
 	virtual void SetBC() = 0;
@@ -49,10 +49,7 @@ public:
 	~Driver();
 	void SetGeometry(Geometry *in_G) {G = in_G;}
 	virtual void Initialize(Geometry *inG, int in_nvars, int in_nDiag = 5);
-	inline void SetLambda(double iLambda, int varc){Lambda[varc] = iLambda;}
-	inline void SetUrf(double iLambda, int varc){Urf[varc] = iLambda;}
-	inline void SetTolerance(double Tolerance){Tol = Tolerance;}
-	inline void SetInners(long int Inners){inners = Inners;}
+	inline void SetTimeScheme(int iTScheme){Time_Scheme = iTScheme;}
 	inline static void Setrestart(unsigned short res){restart = res;}
 	inline static unsigned short Getrestart(){return restart;}
 	inline static void SetTStep(double idt){dt = idt;}
@@ -61,13 +58,14 @@ public:
 	inline static unsigned long int GetiTime(){return itime;}
 	inline static double GetTimeStep(){return dt;}
 	inline static double GetTime(){return time;}
-	inline static void SetTimeScheme(int iTScheme){Time_Scheme = iTScheme;}
-	inline static unsigned short GetTimeScheme(){return Time_Scheme;}
+	inline static void IncOuter(){Solver::im();}
+	inline static unsigned int GetOuter(){return Solver::Getm();}
 
 	const double* GetPhi(int in_var){return phi[in_var];}
-	virtual void Solve() = 0;
+	virtual void Solve();
 	virtual void Init() = 0;
 	virtual void Store() = 0;
+	void SetParams(double *Lambda, double *Urf, double Tol, long int inners);
 	
 };
 

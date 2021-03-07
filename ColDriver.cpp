@@ -2,7 +2,6 @@
 
 using namespace std;
 
-unsigned short Driver::Time_Scheme=0;
 unsigned short Driver::restart=0;
 double Driver::dt=0.0;
 double Driver::time=0.0;
@@ -18,6 +17,7 @@ Driver::Driver()
 	phi = NULL, phi_ = NULL, phi__ = NULL;
 	Ce = 0.0, Cp = 0.0, Cn = 0.0, D = 0.0;
 	Lambda = NULL, Urf = NULL;
+	Sol = NULL;
 }
 
 void Driver::Initialize(Geometry *inG, int in_nvars, int in_nDiag)
@@ -47,12 +47,45 @@ void Driver::Initialize(Geometry *inG, int in_nvars, int in_nDiag)
 	NbrIdx[3] = G->CNy;
 	NbrIdx[4] = 1;
 
+	Sol = new Solver();
+
 	if(Time_Scheme != 2)
+	{
 		Allocate2Dmat(&phi_,nvars,N);
-	if(Time_Scheme == 1)
 		Allocate2Dmat(&phi__,nvars,N);	
+	}
+
+	if(Time_Scheme == 0)
+		Tbf = 0.0;
+	if(Time_Scheme == 1)
+		Tbf = 1.0;
+
+		
 
 	ntime = 0; time = 0.0;
+}
+
+void Driver::SetParams(double *iLambda, double *iUrf, double iTol, long int Inners)
+{
+	if(Sol)
+	{
+		Sol->SetScode(1);
+		Sol->SetPcode(0);
+		Sol->SetA(A, NbrIdx, 5);
+		Sol->SetTol(iTol);
+		Sol->SetnInner(Inners);
+	}
+	for(unsigned short t = 0; t < nvars; t++)
+	{
+		Urf[t] = iUrf[t];
+		Lambda[t] = iLambda[t];
+	}
+}
+
+void Driver::Solve()
+{
+	if(Driver::GetOuter() == 0)
+		Sol->Initialize(G->Map21, 1, G->CNx-1, G->N);
 }
 
 Driver::~Driver()
@@ -121,37 +154,25 @@ MomDriver::MomDriver(double irho, double imu, double igx, double igy, double ibe
 
 void MomDriver::Initialize(Geometry *inG, int nDim, int nDiag)
 {
-	Time_Scheme = 2;
-	inners = 80;
-	Tol = 0.02;
 	Driver::Initialize(inG, nDim, nDiag);
 	Allocate2Dmat(&Ap,nDim,G->N);
 	Allocate2Dmat(&pgrad,nDim,G->N);
-	Sol = new Solver();
-	Sol->SetScode(1);
-	Sol->SetPcode(0);
-	Sol->Initialize(G->Map21, 1, G->CNx-1, G->N);
-	Sol->SetA(A, NbrIdx, 5);
-	Sol->SetnInner(inners);
-	Sol->SetTol(Tol);
-	// cout<<Ap[U]<<"	"<<Ap[V]<<endl;
 	double Ur = max(Solver::LinfNorm(phi[U],G->N),Solver::LinfNorm(phi[V],G->N));
 	double Lr = min(G->x[G->Nx-1]-G->x[0],G->y[G->Nx-1]-G->y[0]);
 	cout<<"Reynolds Number = "<<rho*Ur*Lr/mu<<endl;
 	if(bodyforcing == 1)
 		cout<<"Rayleigh Number = "<<rho*rho*max(gx,gy)*beta*(1.0)*Lr*Lr*Lr*0.1/(mu*mu)<<endl;
-
-	Lambda[U] = 1.0, Urf[U] = 0.8;
-	Lambda[V] = 1.0, Urf[V] = 0.8;
-
 	cout<<"Momentum Driver Setup"<<endl;
 }
 
+
+
 void MomDriver::Solve()
 {
-	if(Driver::GetTimeScheme() !=2)
+	Driver::Solve();
+	if(Time_Scheme !=2)
 	{
-		if(Driver::GetTimeScheme() == 1)
+		if(Time_Scheme == 1)
 		{
 			Solver::copyvec(phi_[U],phi__[U],G->N);
 			Solver::copyvec(phi_[V],phi__[V],G->N);	
@@ -159,7 +180,6 @@ void MomDriver::Solve()
 		Solver::copyvec(phi[U],phi_[U],G->N);
 		Solver::copyvec(phi[V],phi_[V],G->N);	
 	}
-
 	ComputeConDiff();
 	ComputePGrad();
 	if(bodyforcing)
@@ -170,10 +190,15 @@ void MomDriver::Solve()
 	SetEquation(U);
 	Sol->Setb(S[U]);
 	Sol->Setphi(phi[U]);
+	StoreMat("Au.dat");
+	StoreS("bu.dat",U);
 	Sol->Solve();
 	MomRes[U] = Sol->GetRes();
 	SetEquation(V);
 	Sol->Setb(S[V]);
+
+	StoreMat("Av.dat");
+	StoreS("bv.dat",V);
 	Sol->Setphi(phi[V]);
 	Sol->Solve();
 	MomRes[V] = Sol->GetRes();
@@ -205,7 +230,7 @@ void MomDriver::ComputeConDiff()
 		dxE = G->X[I+1] - G->X[I];
 
 		P = G->Map21[I]; E = P + CNy;
-		for(long int J = 1; J < CNx-1; J++)
+		for(long int J = 1; J < CNy-1; J++)
 		{
 			P = P+1;
 			E = E+1;
@@ -321,18 +346,10 @@ void MomDriver::ComputeTime()
 			Dy = G->y[J]-G->y[J-1];
 			Vc = Dx*Dy;
 			At = rho*Vc/dt;
-			if(Time_Scheme == 0)
-			{
-				S[U][P] += At*phi_[U][P];
-				S[V][P] += At*phi_[V][P];
-				Ap[U][P] += At;Ap[V][P] += At;
-			}
-			if(Time_Scheme == 1)
-			{
-				S[U][P] += At*0.5*(4*phi_[U][P]-phi__[U][P]);
-				S[V][P] += At*0.5*(4*phi_[V][P]-phi__[V][P]);
-				Ap[U][P] += At*1.5; Ap[V][P] += At*1.5;
-			}
+			S[U][P] += At*((1.0+Tbf)*phi_[U][P] - 0.5*Tbf*phi__[U][P]);
+			S[V][P] += At*((1.0+Tbf)*phi_[V][P] - 0.5*Tbf*phi__[V][P]);
+			Ap[U][P] += At*(1.0+0.5*Tbf);
+			Ap[V][P] += At*(1.0+0.5*Tbf);
 		}
 	}
 }
@@ -343,7 +360,6 @@ void MomDriver::SetEquation(int varc)
 	fstream f;
 	char fn[30];
 	sprintf(fn,"Ar_%d.dat",varc);
-	// f.open(fn,ios::out);
 	for(long int I = 1; I < CNx-1; I++)
 	{
 		long int P = G->Map21[I];
@@ -353,10 +369,8 @@ void MomDriver::SetEquation(int varc)
 			A[2][P] = (-(A[0][P] + A[1][P] + A[3][P] + A[4][P]) + Ap[varc][P])/Urf[varc];
 			S[varc][P] += A[2][P]*phi[varc][P]*(1.0 - Urf[varc]);
 			Ap[varc][P] = 1.0/A[2][P];
-			// f<<I<<"	"<<J<<"	"<<Ap[varc][P]<<"	"<<A[2][P]<<endl;
 		}
 	}
-	// f.close();
 }
 
 void MomDriver::ComputeSource()
@@ -389,6 +403,53 @@ void MomDriver::SetMomBC(int varc)
 {
 	int CNx = G->CNx, CNy = G->CNy;
 	long int P;
+
+	// //South Boundary - Wall
+	// double n[2] {0.0, -1.0};
+	// for(long int I = 1; I < CNx-1; I++)
+	// {
+	// 	P = G->Map21[I]+1;
+	// 	D = mu*(G->x[I] - G->x[I-1])*(1-n[varc]*n[varc])/((G->Y[0] - G->Y[1])*n[1]);
+	// 	Ap[varc][P] += D;
+	// 	S[varc][P] += (D)*phi[varc][P-1];
+	// }
+
+	// //North Boundary - Wall
+	// n[0] = 0.0, n[1]= 1.0;
+	// for(long int I = 1; I < CNx-1; I++)
+	// {
+	// 	P = G->Map21[I] + CNy-2;
+	// 	D = mu*(G->x[I] - G->x[I-1])*(1-n[varc]*n[varc])/((G->Y[CNy-1] - G->Y[CNy-2])*n[1]);
+	// 	Ap[varc][P] += D;
+	// 	S[varc][P] += (D)*phi[varc][P+1];
+	// }
+
+	// //Inlet - Left Boundary
+	// n[0] = -1.0, n[1] = 0.0;
+	// P = G->Map21[1];
+	// for(long int J = 1; J < CNy-1; J++)
+	// {
+	// 	D =  mu*(G->y[J] - G->y[J-1])/(-G->X[0]+G->X[1]);
+	// 	S[varc][P+J] += (mdotE[P+J-CNy] + D)*phi[varc][P+J-CNy];
+	// 	Ap[varc][P+J] += D;
+	// }
+
+	// //Outlet - Right Boundary
+	// n[0] = 1.0, n[1] = 1.0;
+	// P = G->Map21[CNx-2];
+	// // double d1,d2;
+	// // d1 = -(G->X[CNx-1]-G->X[CNx-2]); 
+	// // d2 = -(G->X[CNx-1]-G->X[CNx-3]);
+	// // d1 = d1*d1; d2 = d2*d2;
+	// // d1 = d1/(d1-d2); d2 = -d2/(d1-d2);
+	// for(long int J = 1; J < CNy-1; J++)
+	// {
+	// 	//Use the extrapolated boundary condition
+	// 	// D = mu*(G->y[J]-G->y[J-1])/(G->X[CNx-1]-G->X[CNx-2]);
+	// 	// Ce = max(mdotE[P+J+CNy],0.0);
+	// 	Ap[varc][P+J] += mdotE[P+J+CNy];
+	// 	// S[varc][P+J] += -mdotE[P+J+CNy]*phi[varc][P+J+CNy];
+	// }
 	
 	//South Boundary
 	double n[2] = {0.0,-1.0};
@@ -424,7 +485,7 @@ void MomDriver::SetMomBC(int varc)
 		S[varc][P] += (D)*phi[varc][P+1];
 	}
 
-	//East Boundary
+	// East Boundary
 	n[0] = 1.0, n[1] = 0.0;
 	P = G->Map21[CNx-2];
 	for(long int J = 1; J < CNy-1; J++)
@@ -496,7 +557,7 @@ void MomDriver::Store()
 	}
 	fu.close();
 
-	if(Driver::GetTimeScheme() == 2)
+	if(Time_Scheme == 2)
 	{
 		fu.open("Sf_convergence.dat",ios::app);
 		fu<<(G->Nx-1)*(G->Ny-1)<<"	"<<sfmax<<"	"<<sfmin<<endl;
@@ -523,14 +584,6 @@ void PresDriver::Initialize(Geometry *inG, int nvar, int nDiag)
 	Allocate1Dvect(&p,G->N);
 	Allocate1Dvect(&mdotE,G->N);
 	Allocate1Dvect(&mdotN,G->N);
-	Sol = new Solver();
-	Sol->SetScode(1);
-	Sol->SetPcode(0);
-	Sol->Initialize(G->Map21, 1, G->CNx-1, G->N);
-	Sol->SetA(A, NbrIdx, 5);
-	Sol->SetTol(0.01);
-	Sol->SetnInner(900);
-	Lambda[0] = 0.0; Urf[0] = 0.3;
 	cout<<"Pressure Driver Setup"<<endl;
 }
 
@@ -581,11 +634,12 @@ PresDriver::~PresDriver()
 
 void PresDriver::Solve()
 {
+	Driver::Solve();
 	ComputeConDiff();
 	SetBC();
 	SetEquation();
-	// StoreMat("Ap.dat");
-	// StoreS("bp.dat",0);
+	StoreMat("Ap.dat");
+	StoreS("bp.dat",0);
 	Sol->Setb(S[0]);
 	// cout<<"Residual Sum = "<<Solver::sumvec(S[0],G->N)<<endl;
 	Sol->Setphi(phi[0]);
@@ -674,22 +728,88 @@ void PresDriver::SetPresBC()
 {
 	long int P;
 
-	//South Boundary & North Boundary
+	Mdot = 0.0;
+	long int CNx = G->CNx, CNy = G->CNy;
+
+	// South Boundary & North Boundary
 	for(long int I = 1; I < G->CNx-1; I++)
 	{
 		mdotN[G->Map21[I]] = 0.0;
 		mdotN[G->Map21[I]+G->CNy-1] = 0.0;
 	}
+	// for(int I = 1; I < G->CNx-1; I++)
+	// {
+	// 	uf[G->Map21[I] + G->CNy-1] = 0.0;
+	// 	vf[G->Map21[I] + G->CNy-1] = 0.0;
 
-	//West Boundary & East Boundary
-	for(long int J = 1; J < G->CNy-1; J++)
+	// 	uf[G->Map21[I]] = 0.0;
+	// 	vf[G->Map21[I]] = 0.0;
+
+	// 	mdotN[G->Map21[I]] = 0.0;
+	// 	mdotN[G->Map21[I]+G->CNy-1] = 0.0;
+	// }
+
+	//Velocity BC for Inlet - West Boundary -> Can compute total mass entering
+	// P = G->Map21[0];
+	// for(int J = 1; J < G->CNy-1; J++)
+	// {
+	// 	uf[P+J] = 1.0;
+	// 	vf[P+J] = 0.0;
+	// 	mdotE[P+J] = rho*uf[P+J]*(G->y[J]-G->y[J-1]);
+	// }
+
+	//Velocity BC for Outlet - East Boundary
+	//Extrapolate cell velocities to faces using 0 gradient
+	//Compute predictor mass flux through outlet
+	// double d1,d2;
+	// d1 = -(G->X[CNx-1]-G->X[CNx-2]);
+	// d2 = -(G->X[CNx-1]-G->X[CNx-3]);
+	// d1 = d1*d1; d2 = d2*d2;
+	// d1 = d1/(d1-d2); d2 = -d2/(d1-d2);
+	//Calculate total mass flux through all the cell faces
+	for(long int I = 1; I < CNx-1; I++)
 	{
-		mdotE[J] = 0.0;
-		P = G->Map21[G->CNx-1];
-		mdotE[P+J] = 0.0;
-	}	
+		P = G->Map21[I];
+		for(long int J =1; J < CNy-1; J++)
+			Mdot += (mdotE[P+J]-mdotE[P+J-CNy]+mdotN[P+J]-mdotN[P+J-1]);
+	}
+	cout<<"Internal mass flux="<<Mdot<<endl;
 
-	Mdot = 0.0;
+
+
+	P = G->Map21[CNx-1];
+	long int Noutlet = 0;
+	double ub, vb;
+	for(long int J = 1; J < CNy-1; J++)
+	{	
+		//Extrapolate cell center velocities to face
+		ub = u[P+J-CNy];
+		vb = u[P+J-CNy];
+		//Compute predictor mass flux
+		mdotE[P+J] = rho*(G->y[J]-G->y[J-1])*ub;
+		//Add the predicted mass flux to total mass flow rate
+		Mdot += mdotE[P+J];
+		Noutlet++;
+	}
+	cout<<Mdot<<endl;
+	//Mdot contains the net mass flow rate which must balance inlet flow rate
+	//This flow rate is added to each face to make net flow rate 0
+	MdotC = (-1.0)*Mdot/Noutlet;
+	cout<<Mdot<<"	"<<MdotC<<"	"<<Noutlet<<endl;
+	//Correct mass fluxes along each face and set outlet velocities
+	for(long int J = 1; J < CNy-1; J++)
+		mdotE[P+J-CNy] += MdotC;
+
+
+	// //West Boundary & East Boundary
+	// for(long int J = 1; J < G->CNy-1; J++)
+	// {
+	// 	mdotE[J] = 0.0;
+	// 	P = G->Map21[G->CNx-1];
+	// 	mdotE[P+J] = 0.0;
+	// }	
+
+	// Mdot = 0.0;
 }
 
 void PresDriver::SetEquation(int varc)
@@ -845,18 +965,7 @@ ScalDriver::~ScalDriver()
 
 void ScalDriver::Initialize(Geometry *inG, int nDim, int nDiag)
 {
-	Time_Scheme = 2;
 	Driver::Initialize(inG, nDim, nDiag);
-	Sol = new Solver();
-	Sol->SetScode(1);
-	Sol->SetPcode(0);
-	Sol->Initialize(G->Map21, 1, G->CNx-1, G->N);
-	Sol->SetA(A, NbrIdx, 5);
-	Sol->SetnInner(50);
-	Sol->SetTol(0.05);
-	// cout<<Ap[U]<<"	"<<Ap[V]<<endl;
-	Lambda[T] = 1.0, Urf[T] = 0.9;
-
 	cout<<"Scalar Driver Setup"<<endl;
 }
 
@@ -950,10 +1059,16 @@ void ScalDriver::SetBC()
 {
 	long int Pw = G->Map21[0], Pe = G->Map21[G->CNx-1];
 	if(Solver::Getm() == 0)
-		for(long int J = 0; J < G->CNy; J++)
+		// for(long int J = 0; J < G->CNy; J++)
+		// {
+		// 	phi[T][Pw + J] = 0.0;
+		// 	phi[T][Pe + J] = 1.0;
+		// }
+		for(long int I = 0; I < G->CNx; I++)
 		{
-			phi[T][Pw + J] = 0.0;
-			phi[T][Pe + J] = 1.0;
+			Pw = G->Map21[I]; Pe = Pw + G->CNy-1;
+			phi[T][Pw] = 0.0;
+			phi[T][Pe] = 1.0; 
 		}
 	SetScalBC();
 }
@@ -966,29 +1081,52 @@ void ScalDriver::SetScalBC()
 
 	
 	//South Boundary & North Boundary - Adiabatic walls
-	for(long int I = 1; I < CNx-1; I++)
-	{
-		P1 = G->Map21[I];
-		g = G->gy[1];
-		phi[T][P1] = phi[T][P1+1] + g*(phi[T][P1+1]-phi[T][P1+2]);
+	// for(long int I = 1; I < CNx-1; I++)
+	// {
+	// 	P1 = G->Map21[I];
+	// 	g = G->gy[1];
+	// 	phi[T][P1] = phi[T][P1+1] + g*(phi[T][P1+1]-phi[T][P1+2]);
 
-		P1 = P1 + CNy-1;
-		g = G->gy[CNy-3];
-		phi[T][P1] = phi[T][P1-1] + (1.0-g)*(phi[T][P1-1]-phi[T][P1-2]);
-	}
+	// 	P1 = P1 + CNy-1;
+	// 	g = G->gy[CNy-3];
+	// 	phi[T][P1] = phi[T][P1-1] + (1.0-g)*(phi[T][P1-1]-phi[T][P1-2]);
+	// }
 
 
 	//West Boundary & East Boundary - Isothermal walls
-	P1 = G->Map21[1]; P2 = G->Map21[CNx-2];
+	// P1 = G->Map21[1]; P2 = G->Map21[CNx-2];
+	// for(long int J = 1; J < CNy-1; J++)
+	// {
+	// 	D = (mu/Pr)*(G->y[J] - G->y[J-1])/(-G->X[0]+G->X[1]);
+	// 	A[2][P1+J] += D;
+	// 	S[T][P1+J] += (D)*phi[T][P1+J-CNy];
+
+	// 	D = (mu/Pr)*(G->y[J] - G->y[J-1])/(G->X[CNx-1]-G->X[CNx-2]);
+	// 	A[2][P2+J] += D;
+	// 	S[T][P2+J] += (D)*phi[T][P2+J+CNy];
+	// }
+
+	//North and South boundary - Isothermal Walls
+	for(long int I = 1; I < CNx-1; I++)
+	{
+		P1 = G->Map21[I]+1;
+		D = (mu/Pr)*(G->x[I]-G->x[I-1])/(G->Y[1]-G->Y[0]);
+		A[2][P1] += D;
+		S[T][P1] += D*phi[T][P1-1];
+
+		P1 = G->Map21[I]+CNy-2;
+		D = (mu/Pr)*(G->x[I]-G->x[I-1])/(G->Y[CNy-1]-G->Y[CNy-2]);
+		A[2][P1] +=D;
+		S[T][P1] += D*phi[T][P1+1];
+	}
+
+	//East and West Boundary - Adiabatic Walls
+	P1 = G->Map21[0], P2 = G->Map21[CNx-1];
+	double g1 = G->gx[1], g2 = G->gx[CNx-3];
 	for(long int J = 1; J < CNy-1; J++)
 	{
-		D = (mu/Pr)*(G->y[J] - G->y[J-1])/(-G->X[0]+G->X[1]);
-		A[2][P1+J] += D;
-		S[T][P1+J] += (D)*phi[T][P1+J-CNy];
-
-		D = (mu/Pr)*(G->y[J] - G->y[J-1])/(G->X[CNx-1]-G->X[CNx-2]);
-		A[2][P2+J] += D;
-		S[T][P2+J] += (D)*phi[T][P2+J+CNy];
+		phi[T][P1+J] = phi[T][P1+J+CNy]+g1*(phi[T][P1+J+CNy]-phi[T][P1+J+2*CNy]);
+		phi[T][P2+J] = phi[T][P2+J-CNy] + (1.0-g2)*(phi[T][P2+J-CNy]-phi[T][P2+J-2*CNy]);
 	}
 }
 
@@ -1029,9 +1167,6 @@ void ScalDriver::ComputeTime()
 void ScalDriver::SetEquation(int varc)
 {
 	long int CNx = G->CNx, CNy = G->CNy;
-	// fstream f;
-	// char fn[30];
-	// sprintf(fn,"Ar_%d.dat",varc);
 	for(long int I = 1; I < CNx-1; I++)
 	{
 		long int P = G->Map21[I];
@@ -1046,13 +1181,11 @@ void ScalDriver::SetEquation(int varc)
 
 void ScalDriver::Solve()
 {
+	Driver::Solve();
 	ComputeConDiff();
 	SetBC();
 	SetEquation();
-	// StoreMat("AT.dat");
-	// StoreS("bT.dat",0);
 	Sol->Setb(S[T]);
-	// cout<<"Residual Sum = "<<Solver::sumvec(S[T],G->N)<<endl;
 	Sol->Setphi(phi[T]);
 	Sol->Solve();
 	Reset1Dvect(&A[2],G->N);

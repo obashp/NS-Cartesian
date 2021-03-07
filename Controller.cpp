@@ -5,6 +5,8 @@ long int Controller::iOuter = 0;
 Controller::Controller()
 {
 	Read_InputFile();
+	G = new Geometry();
+	G->Initialize();
 	if(SolverCode == 0)
 	{
 		eq[0] = 1, eq[1] = 1, eq[2] = 1;
@@ -27,9 +29,7 @@ Controller::Controller()
 	{
 		eq[0] = 1;
 		E = new ScalDriver(rho,mu,Pr,Cp);
-	}
-
-	G = new Geometry();
+	}	
 }
 
 Controller::~Controller()
@@ -80,18 +80,26 @@ void Controller::Read_InputFile()
 
 void Controller::Initialize()
 {
-	Driver::SetTimeScheme(Time_Scheme);
 	Driver::Setrestart(RestartFlag);
 	Driver::SetNtime(Ntime);
 	Driver::SetTStep(dt);
 
-	G->Initialize();
+	double iUrf[2], iLambda[2];
 
 	if(SolverCode == 1 || SolverCode == 0)
 	{
+		iLambda[0] = Lambda[0], iLambda[1] = Lambda[0];
+		iUrf[0] = Urf[0], iUrf[1] = Urf[0];
+		M->SetTimeScheme(Time_Scheme);
 		M->Initialize(G);
-		P->Initialize(G);
+		M->SetParams(iLambda,iUrf,Tolerance[0],Inners[0]);
 
+		iLambda[0] = Lambda[1];
+		iUrf[0] = Urf[1];
+		P->SetTimeScheme(Time_Scheme);
+		P->Initialize(G);
+		P->SetParams(iLambda,iUrf,Tolerance[1],Inners[1]);
+		
 		P->SetPGrad(M->GetPGrad(X),X);P->SetPGrad(M->GetPGrad(Y),Y);
 		P->SetVel(M->GetPhi(X),X);P->SetVel(M->GetPhi(Y),Y);
 		P->SetVelC(M->GetVel(X),X);P->SetVelC(M->GetVel(Y),Y);
@@ -105,11 +113,18 @@ void Controller::Initialize()
 
 		if(SolverCode == 0)
 		{
+			iLambda[0] = Lambda[2];
+			iUrf[0] = Urf[2];
+			E->SetTimeScheme(Time_Scheme);
 			E->Initialize(G);
-			if(buoyancy == 1)	M->SetFVar(E->GetPhi(0));
+			E->SetParams(iLambda,iUrf,Tolerance[2],Inners[2]);
+
+			if(buoyancy == 1)	
+				M->SetFVar(E->GetPhi(0));
 
 			E->SetmdotE(P->GetmdotE());
 			E->SetmdotN(P->GetmdotN());	
+			E->SetTimeScheme(Time_Scheme);
 			E->Init();
 		}		
 	}
@@ -172,7 +187,8 @@ void Controller::Run()
 	{
 		while(Controller::GetOuter() < MaxIterations)
 		{
-			if(SolverCode == 0)	E->Solve();
+			if(SolverCode == 0)	
+				E->Solve();
 			M->Solve();
 			P->Solve();
 			Controller::IncOuter();
@@ -186,115 +202,36 @@ void Controller::Run()
 		double time;
 		while(itime < Ntime)
 		{
-			while(Controller::GetOuter() < MaxIterations)
-			{
-				if(SolverCode == 0)	E->Solve();
-				M->Solve();
-				P->Solve();
-				Controller::IncOuter();
-				if(PrintResiduals())
-					break;
-			}
-
+			if(SolverCode == 0)	
+				E->Solve();
+			M->Solve();
+			P->Solve();
+			Controller::IncOuter();
+			if(PrintResiduals())
+				break;
+			
 			if(itime%DataIntervals == 0)
 			{
 				M->Store();
 				P->Store();
-				E->Store();
+				if(SolverCode == 0)	E->Store();
 			}
 
 			itime++;
 			time = time+dt;
+			Driver::IncTime();
 		}
 	}
+
+	if(SolverCode == 0) E->Store();
+	M->Store();
+	P->Store();
 }
 
 int main()
 {
-	// Controller *C = new Controller();
-	// C->Initialize();
-	// C->Run();
-	// if(C) delete C;
-
-	Geometry *G = new Geometry();
-	G->Initialize();
-
-	// MomDriver *M = new MomDriver(1.0, 0.01, 0.0, 1.0, 100.00);
-	// M->Initialize(G);
-
-	MomDriver *M = new MomDriver(1.0, 0.001);
-	M->Initialize(G);
-
-	PresDriver *P = new PresDriver(1.0);
-	P->Initialize(G);
-
-	// ScalDriver *E = new ScalDriver(1.0, 0.01, 0.1);
-	// E->Initialize(G);
-
-	P->SetPGrad(M->GetPGrad(X),X);P->SetPGrad(M->GetPGrad(Y),Y);
-	P->SetVel(M->GetPhi(X),X);P->SetVel(M->GetPhi(Y),Y);
-	P->SetVelC(M->GetVel(X),X);P->SetVelC(M->GetVel(Y),Y);
-	P->SetAp(M->GetDiag(X),X);P->SetAp(M->GetDiag(Y),Y);
-
-	M->SetPressure(P->GetPressure());
-	M->SetmdotE(P->GetmdotE());
-	M->SetmdotN(P->GetmdotN());
-	// M->SetFVar(E->GetPhi(0));
-
-	// E->SetmdotE(P->GetmdotE());
-	// E->SetmdotN(P->GetmdotN());
-
-	Driver::Setrestart(1);
-	P->Init();
-	// E->Init();
-
-	fstream f;
-	f.open("Max_Residuals.dat",ios::out);
-	double Ru = 0.0;
-	int I = 1;
-	cout<<"			Residuals"<<endl;
-	cout<<"-------Iter--------U----------V----------P----------T---------"<<endl;
-	while(1)
-	{
-		// E->Solve();
-		M->Solve();
-		P->Solve();
-		Solver::im();
-		double Ru = M->GetRes(X); 
-		double Rv = M->GetRes(Y);
-		double Rp = P->GetRes();
-		// double RT = E->GetRes();
-		cout<<I<<"	"<<Ru<<"	"<<Rv<<"	"<<Rp;
-		// cout<<"	"<<RT;
-		cout<<endl;
-		
-		f<<I<<"	"<<Ru<<"	"<<Rv<<"	"<<Rp<<endl;
-		I++;
-			
-		// cout<<endl;
-		Ru = max(Ru,Rv); Ru = max(Ru,Rp); 
-		// Ru = max(Ru,RT);
-		if(I %100 == 0)
-			cout<<"-------Iter--------U----------V----------P----------T---------"<<endl;
-		if(Ru < 1e-5)
-		{
-			cout<<"converged"<<endl;
-			break;
-		}
-
-	}
-	f.close();
-
-	M->Store();
-	P->Store();
-	// E->Store();
-
-	// if(E) delete E;
-	// E = NULL;
-	if(P) delete P;
-	P = NULL;
-	if(M) delete M;
-	M = NULL;
-	if(G) delete G;
-	G = NULL;
+	Controller *C = new Controller();
+	C->Initialize();
+	C->Run();
+	if(C) delete C;
 }

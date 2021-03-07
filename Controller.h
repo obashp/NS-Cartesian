@@ -30,7 +30,7 @@ class Controller
 public:
 	Controller();
 	~Controller();
-	inline static void IncOuter(){iOuter = iOuter+1;}
+	inline static void IncOuter(){iOuter = iOuter+1; Driver::IncOuter();}
 	inline static long int GetOuter(){return iOuter;}
 	void Initialize();
 	void Run();

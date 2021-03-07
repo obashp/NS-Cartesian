@@ -187,18 +187,6 @@ void Solver::Initialize(long int *Map,long int l,long int u, long int iN)
 	alpha = 0.0;
 	orf = 1.4;
 	
-	// fstream f;
-	// f.open("SolverInfo.dat",ios::in);
-	// string fstr, pstr = ParString;
-	// while(getline(f,fstr) && !f.eof())
-	// {
-	// 	if(fstr != pstr)
-	// 		continue;
-
-	// 	f>>Scode>>Pcode;
-	// 	f>>orf>>alpha>>Tolerance;	
-	// }
-
 	Allocate1Dvect(&Rn,N);
 
 	if(Pcode == 1)
@@ -292,6 +280,7 @@ int Solver::GSSORSolver()
 		ComputeResidual();
 		if(iters == 0) ResNorm = L1Norm(Rn,N);
 		iters++;
+		cout<<Solver::L1Norm(Rn,N)<<endl;
 		if(IsConverged(Rn,N))
 			break;
 	}
